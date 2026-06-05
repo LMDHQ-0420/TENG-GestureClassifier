@@ -163,3 +163,4 @@ Raw CSV → segmenter → cleaner → features → 9D 特征 CSV
 | 2026-06-05 | pipeline.py | 修复 features 目录不存在时的写入报错（添加 mkdir） |
 | 2026-06-05 | notebooks/ | 重写两个 ipynb：01 完整预处理文档（6 节含详细说明），02 参数调优案例文档（5 节含对比分析） |
 | 2026-06-05 | model/dataset/train/evaluate | MLP→随机森林；数据划分改为按(环境,手势)分层 80/20 |
+| 2026-06-05 | notebooks/ | 新增 03_training_results.ipynb：训练结果分析（7 节：划分、混淆矩阵、各环境评估、特征重要度、误分类、参数敏感性） |
