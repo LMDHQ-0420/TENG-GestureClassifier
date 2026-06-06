@@ -112,7 +112,57 @@ Raw CSV → segmenter → cleaner → features → 9D 特征 CSV
 
 ---
 
-## 模型（src/model.py）
+## 三种建模方案概览
+
+| 方案 | 信号处理 | 特征/输入 | 模型 | Test |
+|------|---------|----------|------|------|
+| 基线 | — | 9 维 | RandomForest | 0.667 |
+| 路线A | VMD 分解 | 111 维多域 | ExtraTrees | 0.768 |
+| 路线B | CWT scalogram | [3,64,128] | 2D-CNN | 0.747 |
+
+三方共用 `src/preprocess/` 的信号准备，和相同的 train/test 划分（random_state=42）保证可对比。
+
+---
+
+## 信号分解模块（src/decompose/）
+
+### vmd.py — VMD 变分模态分解
+- `vmd_decompose(signal_1ch)`：单通道 → K=4 个 IMF（按中心频率低→高排序）
+- `vmd_decompose_3ch`：三通道分别分解 → [3, K, T]
+- 参数：alpha=2000（带宽约束），K=4，tol=1e-7
+- VMD 要求偶数长度，奇数自动截断末点
+
+### cwt.py — CWT scalogram 时频图
+- `cwt_scalogram(signal_1ch)`：单通道 → [64尺度, 128时间]，Morlet 小波
+- `cwt_scalogram_3ch`：三通道 → [3, 64, 128]
+- **关键：全局 log 归一化**（非每通道独立），保留通道间相对能量，CNN 准确率因此 +20%
+- 时间轴重采样到固定宽度 128，统一变长片段
+
+### features_rich.py — 111 维多域特征
+- `extract_rich_features(segment_3ch)`：VMD 分解后每 IMF 提取 9 特征
+- 每 IMF 特征：MAV/RMS/WL/ZCR/KURT/SKEW（时域）+ FC/BW/PF（频域）
+- 维度：3通道 × 4 IMF × 9 = 108，加 3 维 Ratio = 111
+
+---
+
+## 路线A（src/routeA/）
+
+- `pipeline_a.py`：读 all_features.csv 元信息 → 对每个 .npy 提 111 维 → rich_features.csv
+- `train_a.py`：ExtraTrees（300树，balanced）+ 5折交叉验证；分层划分同 random_state=42
+- `evaluate_a.py`：分类报告 + 混淆矩阵 + 各环境准确率 + 特征重要度
+- 模型实验对比：ExtraTrees(0.768) > RF(0.758) > HistGB(0.707) > SVM(0.687)
+
+## 路线B（src/routeB/）
+
+- `dataset_b.py`：预计算 scalogram 缓存 + 数据增强（时移/缩放/噪声/频带遮挡）+ train/val/test 划分
+- `model_b.py`：轻量 2D-CNN，4 个 Conv 块(32→64→128→128) + GAP + Dropout(0.4)，~26万参数
+- `train_b.py`：Adam + 余弦退火 + 标签平滑(0.05) + 早停(patience=30)；weight_decay=3e-4
+- `evaluate_b.py`：分类报告 + 混淆矩阵 + 训练曲线
+- 防过拟合关键：全局归一化 + 适度增强（过强会欠拟合）+ GAP 替代大 FC
+
+---
+
+## 基线模型（src/model.py）
 
 随机森林分类器（scikit-learn `RandomForestClassifier`）：
 - 200 棵决策树，`max_features="sqrt"`，`class_weight="balanced"`
@@ -164,3 +214,10 @@ Raw CSV → segmenter → cleaner → features → 9D 特征 CSV
 | 2026-06-05 | notebooks/ | 重写两个 ipynb：01 完整预处理文档（6 节含详细说明），02 参数调优案例文档（5 节含对比分析） |
 | 2026-06-05 | model/dataset/train/evaluate | MLP→随机森林；数据划分改为按(环境,手势)分层 80/20 |
 | 2026-06-05 | notebooks/ | 新增 03_training_results.ipynb：训练结果分析（7 节：划分、混淆矩阵、各环境评估、特征重要度、误分类、参数敏感性） |
+| 2026-06-06 | src/decompose/ | 新增信号分解模块：vmd.py(VMD分解)、cwt.py(CWT scalogram)、features_rich.py(111维多域特征) |
+| 2026-06-06 | src/routeA/ | 路线A：VMD+111维多域特征+ExtraTrees，test 0.768（基线0.667）。新增 notebook 04 |
+| 2026-06-06 | src/routeB/ | 路线B：CWT scalogram+轻量2D-CNN，test 0.747。关键：全局log归一化保留通道间能量(+20%)。新增 notebook 05 |
+| 2026-06-06 | requirements/README | 加 PyWavelets/EMD-signal/vmdpy；README 增三方案对比 |
+| 2026-06-06 | src/decompose/features_enhanced.py | 新增232维增强特征(Hjorth/熵/Hilbert包络/小波包/通道相关)。单片段5种子真实均值0.796 |
+| 2026-06-06 | notebooks/ | 新增 06_summary_comparison.ipynb：多方法5种子真实对比+学习曲线+数据量建议。文件级投票达0.863，外推达90%需每类~69片段(1.8倍数据) |
+| 2026-06-06 | data/processed/method_results.json | 缓存所有方法的多种子实验结果+学习曲线外推，供notebook读取 |
