@@ -1,4 +1,4 @@
-"""训练流水线：增强特征 + Top-100 特征选择 + LightGBM
+"""训练流水线：增强特征 + 时序特征 → Top-100 特征选择 → 4模型软投票
 
 用法：python -m src.train
 """
@@ -10,91 +10,118 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.model import build_model, select_top_features
+from src.model import build_ensemble, select_top_features
 from src.decompose.features_enhanced import ENHANCED_FEATURE_NAMES, extract_enhanced_features
+from src.decompose.features_temporal import extract_temporal_features
 
 ENHANCED_PATH = PROJECT_ROOT / "data" / "processed" / "features" / "enhanced_features.csv"
+TEMPORAL_PATH = PROJECT_ROOT / "data" / "processed" / "features" / "temporal_features.npy"
 MODEL_DIR = PROJECT_ROOT / "checkpoints"
 TOP_K = 100
 
 
-def load_or_extract():
-    """加载已缓存的增强特征，若不存在则重新提取"""
+def load_features():
+    """加载增强特征 + 时序特征，合并为完整特征矩阵"""
+    meta = pd.read_csv(PROJECT_ROOT / "data" / "processed" / "features" / "all_features.csv")
+    meta = meta[meta["duration_ms"] >= 200].reset_index(drop=True)
+    y = meta["label"].values
+
+    # 增强特征
     if ENHANCED_PATH.exists():
-        df = pd.read_csv(ENHANCED_PATH)
-        print(f"加载增强特征: {len(df)} 样本 x {len(ENHANCED_FEATURE_NAMES)} 维")
+        df_enh = pd.read_csv(ENHANCED_PATH)
+        X_enh = df_enh[ENHANCED_FEATURE_NAMES].values[:len(y)]
+        print(f"增强特征: {X_enh.shape}")
     else:
-        print("增强特征不存在，重新提取...")
-        from src.preprocess.pipeline import run_all
-        meta = pd.read_csv(PROJECT_ROOT / "data" / "processed" / "features" / "all_features.csv")
-        keep = []; X_list = []
-        for i, r in meta.iterrows():
-            seg_path = PROJECT_ROOT / "data" / r["npy_path"]
-            if not seg_path.exists(): continue
-            seg = np.load(seg_path)
-            if seg.shape[0] < 200: continue
-            X_list.append(extract_enhanced_features(seg))
-            keep.append(i)
-        X = np.array(X_list)
-        df = meta.loc[keep].reset_index(drop=True)
-        for j, name in enumerate(ENHANCED_FEATURE_NAMES):
-            df[name] = X[:, j]
-        df.to_csv(ENHANCED_PATH, index=False)
-        print(f"提取完成: {len(df)} 样本 x {len(ENHANCED_FEATURE_NAMES)} 维")
-    return df
+        raise FileNotFoundError("请先运行 python -m src.routeA.pipeline_a 生成增强特征")
+
+    # 时序特征（有缓存则直接加载）
+    if TEMPORAL_PATH.exists():
+        X_temp = np.load(TEMPORAL_PATH)
+        print(f"时序特征(缓存): {X_temp.shape}")
+    else:
+        print("提取时序特征（首次运行较慢）...")
+        X_temp = []
+        for _, r in meta.iterrows():
+            seg = np.load(PROJECT_ROOT / "data" / r["npy_path"]).astype(np.float32)
+            X_temp.append(extract_temporal_features(seg))
+        X_temp = np.nan_to_num(np.array(X_temp))
+        np.save(TEMPORAL_PATH, X_temp)
+        print(f"时序特征: {X_temp.shape}")
+
+    X = np.hstack([X_enh, X_temp])
+    print(f"合并特征: {X.shape}")
+    return X, y, meta
 
 
 def train(test_ratio: float = 0.2, random_state: int = 42):
     MODEL_DIR.mkdir(exist_ok=True)
 
-    df = load_or_extract()
-    X = df[ENHANCED_FEATURE_NAMES].values
-    y = df["label"].values
-    meta = df[["seg_id", "env", "source_file", "gesture_name", "label"]].copy()
+    X, y, meta = load_features()
+    n = len(y)
 
-    # 分层划分（按手势标签，不按环境，最大化判别效果）
-    itr, ite = train_test_split(np.arange(len(y)), test_size=test_ratio,
+    itr, ite = train_test_split(np.arange(n), test_size=test_ratio,
                                 stratify=y, random_state=random_state)
 
-    # 特征选择（基于训练集）
-    print(f"\n特征选择：从 {len(ENHANCED_FEATURE_NAMES)} 维选 Top-{TOP_K}...")
+    # 特征选择（基于训练集 ExtraTrees 重要度）
+    print(f"\n特征选择：从 {X.shape[1]} 维选 Top-{TOP_K}...")
     top_idx = select_top_features(X[itr], y[itr], k=TOP_K, random_state=random_state)
-    X_sel = X[:, top_idx]
 
+    X_sel = X[:, top_idx]
     X_train, X_test = X_sel[itr], X_sel[ite]
     y_train, y_test = y[itr], y[ite]
 
+    # StandardScaler for SVM
+    scaler = StandardScaler().fit(X_train)
+    X_train_s = scaler.transform(X_train)
+    X_test_s = scaler.transform(X_test)
+
     print(f"Train: {len(y_train)}, Test: {len(y_test)}")
 
-    # 5-fold CV（在训练集上）
-    model = build_model(random_state=random_state)
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
-    cv_scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="accuracy")
-    print(f"\n5-Fold CV: {cv_scores.mean():.3f} +/- {cv_scores.std():.3f}")
-    print(f"  folds: {[f'{s:.3f}' for s in cv_scores]}")
+    # 训练 4 个模型
+    models = build_ensemble(random_state=random_state)
+    print("\n训练 4 个模型...")
+    for i, m in enumerate(models):
+        if i == 3:  # SVM 用标准化特征
+            m.fit(X_train_s, y_train)
+        else:
+            m.fit(X_train, y_train)
+        print(f"  模型{i+1} 训练完成")
 
-    # 训练并评估
-    model.fit(X_train, y_train)
-    train_acc = model.score(X_train, y_train)
-    test_acc = model.score(X_test, y_test)
-    print(f"\nTrain Accuracy: {train_acc:.3f}")
-    print(f"Test Accuracy:  {test_acc:.3f}")
+    # 软投票预测
+    p1 = models[0].predict_proba(X_test)
+    p2 = models[1].predict_proba(X_test)
+    p3 = models[2].predict_proba(X_test)
+    p4 = models[3].predict_proba(X_test_s)
+    avg = (p1 + p2 + p3 + p4) / 4
+    pred = models[0].classes_[avg.argmax(1)]
+    test_acc = accuracy_score(y_test, pred)
+
+    # 单模型训练集准确率
+    train_acc = accuracy_score(y_train, models[0].classes_[
+        ((models[0].predict_proba(X_train) + models[1].predict_proba(X_train) +
+          models[2].predict_proba(X_train) + models[3].predict_proba(X_train_s)) / 4).argmax(1)])
+
+    print(f"\nTrain Accuracy (ensemble): {train_acc:.3f}")
+    print(f"Test Accuracy  (ensemble): {test_acc:.3f}")
 
     # 保存
-    joblib.dump(model, MODEL_DIR / "lgbm_model.pkl")
+    joblib.dump(models, MODEL_DIR / "ensemble_models.pkl")
     joblib.dump(top_idx, MODEL_DIR / "top_feature_idx.pkl")
+    joblib.dump(scaler, MODEL_DIR / "scaler.pkl")
 
     # 保存划分
-    meta["split"] = "train"
-    meta.loc[meta.index[ite], "split"] = "test"
-    meta.to_csv(PROJECT_ROOT / "data" / "processed" / "features" / "final_split.csv", index=False)
+    meta_out = meta[["seg_id", "env", "source_file", "gesture_name", "label"]].copy()
+    meta_out["split"] = "train"
+    meta_out.loc[meta_out.index[ite], "split"] = "test"
+    meta_out.to_csv(PROJECT_ROOT / "data" / "processed" / "features" / "final_split.csv", index=False)
 
-    print(f"\nModel saved: {MODEL_DIR / 'lgbm_model.pkl'}")
+    print(f"\nModels saved: {MODEL_DIR / 'ensemble_models.pkl'}")
     return test_acc
 
 

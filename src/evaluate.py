@@ -1,7 +1,4 @@
-"""最终评估：LightGBM + Top-100 特征
-
-用法：python -m src.evaluate
-"""
+"""评估 4 模型软投票集成"""
 
 import sys
 import joblib
@@ -20,33 +17,44 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.preprocess.io import GESTURE_NAMES
 from src.decompose.features_enhanced import ENHANCED_FEATURE_NAMES
-
-MODEL_PATH = PROJECT_ROOT / "checkpoints" / "lgbm_model.pkl"
-IDX_PATH = PROJECT_ROOT / "checkpoints" / "top_feature_idx.pkl"
-SPLIT_PATH = PROJECT_ROOT / "data" / "processed" / "features" / "final_split.csv"
-ENHANCED_PATH = PROJECT_ROOT / "data" / "processed" / "features" / "enhanced_features.csv"
+from src.decompose.features_temporal import extract_temporal_features
 
 
 def evaluate():
-    if not MODEL_PATH.exists():
+    model_path = PROJECT_ROOT / "checkpoints" / "ensemble_models.pkl"
+    if not model_path.exists():
         print("请先运行 python -m src.train")
         return
 
-    model = joblib.load(MODEL_PATH)
-    top_idx = joblib.load(IDX_PATH)
+    models = joblib.load(model_path)
+    top_idx = joblib.load(PROJECT_ROOT / "checkpoints" / "top_feature_idx.pkl")
+    scaler = joblib.load(PROJECT_ROOT / "checkpoints" / "scaler.pkl")
 
-    df_feat = pd.read_csv(ENHANCED_PATH)
-    split_df = pd.read_csv(SPLIT_PATH)
-    test_ids = set(split_df[split_df["split"] == "test"]["seg_id"])
+    # 加载特征
+    df_enh = pd.read_csv(PROJECT_ROOT / "data" / "processed" / "features" / "enhanced_features.csv")
+    temp_path = PROJECT_ROOT / "data" / "processed" / "features" / "temporal_features.npy"
+    X_temp = np.load(temp_path)
+    X_full = np.hstack([df_enh[ENHANCED_FEATURE_NAMES].values, X_temp])
 
-    test_df = df_feat[df_feat["seg_id"].isin(test_ids)].copy()
-    X_test = test_df[ENHANCED_FEATURE_NAMES].values[:, top_idx]
-    y_test = test_df["label"].values
-    y_pred = model.predict(X_test)
+    split_df = pd.read_csv(PROJECT_ROOT / "data" / "processed" / "features" / "final_split.csv")
+    test_mask = split_df["split"] == "test"
+    X_test = X_full[test_mask.values][:, top_idx]
+    y_test = split_df[test_mask]["label"].values
+    test_df = split_df[test_mask].copy()
+
+    X_test_s = scaler.transform(X_test)
+
+    # 软投票预测
+    p1 = models[0].predict_proba(X_test)
+    p2 = models[1].predict_proba(X_test)
+    p3 = models[2].predict_proba(X_test)
+    p4 = models[3].predict_proba(X_test_s)
+    avg = (p1 + p2 + p3 + p4) / 4
+    y_pred = models[0].classes_[avg.argmax(1)]
 
     overall_acc = accuracy_score(y_test, y_pred)
     print("=" * 60)
-    print("Final Model: LightGBM + Top-100 Features")
+    print("Ensemble: 2×LGBM + ExtraTrees + SVM, Top-100 Features (349D)")
     print("=" * 60)
     print(f"Overall Test Accuracy: {overall_acc:.3f}\n")
 
@@ -54,7 +62,7 @@ def evaluate():
     names = [GESTURE_NAMES[i] for i in present]
     print(classification_report(y_test, y_pred, labels=present, target_names=names))
 
-    # 各环境准确率
+    # 各环境
     test_df = test_df.reset_index(drop=True)
     test_df["pred"] = y_pred
     print("Per-environment Accuracy:")
@@ -69,26 +77,10 @@ def evaluate():
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
                 xticklabels=names, yticklabels=names, ax=ax)
     ax.set_xlabel("Predicted"); ax.set_ylabel("True")
-    ax.set_title(f"LightGBM+Top100 Confusion Matrix (Acc: {overall_acc:.3f})")
+    ax.set_title(f"Ensemble Confusion Matrix (Acc: {overall_acc:.3f})")
     plt.tight_layout()
-    fig.savefig(PROJECT_ROOT / "checkpoints" / "final_confusion.png", dpi=150)
+    fig.savefig(PROJECT_ROOT / "checkpoints" / "ensemble_confusion.png", dpi=150)
     print(f"\nConfusion matrix saved.")
-
-    # 特征重要度
-    importances = model.feature_importances_
-    feat_names = [ENHANCED_FEATURE_NAMES[i] for i in top_idx]
-    top20 = np.argsort(importances)[::-1][:20]
-    fig, ax = plt.subplots(figsize=(9, 7))
-    ax.barh(range(20), importances[top20][::-1],
-            color=plt.cm.viridis(np.linspace(0.3, 0.9, 20)))
-    ax.set_yticks(range(20))
-    ax.set_yticklabels([feat_names[i] for i in top20[::-1]], fontsize=8)
-    ax.set_xlabel("Feature Importance (LightGBM)")
-    ax.set_title("Top-20 Feature Importance")
-    ax.grid(True, alpha=0.3, axis="x")
-    plt.tight_layout()
-    fig.savefig(PROJECT_ROOT / "checkpoints" / "final_feature_importance.png", dpi=150)
-    print("Feature importance saved.")
 
 
 if __name__ == "__main__":

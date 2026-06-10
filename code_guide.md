@@ -241,8 +241,7 @@ subsample=0.8, colsample_bytree=0.8, min_child_samples=10, class_weight=balanced
 | 2026-06-06 | data/raw/base/ | 补充新采集数据（-3后缀，10个文件），base从20→30文件。总片段493→1210，base片段245→962 |
 | 2026-06-06 | src/decompose/features_enhanced.py + Stacking | V2数据重跑：增强特征单片段0.816±0.018；Stacking(ET+SVM+RF)0.842±0.021；文件投票0.853±0.020 |
 | 2026-06-06 | notebooks/06 | 更新汇总notebook：V1/V2对比、学习曲线（显示饱和趋势）、数据量建议（手势4/sc是唯一瓶颈，补采达90%） |
-| 2026-06-06 | src/model.py | 模型架构改为 LightGBM+Top-100特征选择。系统对比7种模型后 LightGBM+特征选择最优（0.847±0.017），删除文件投票逻辑 |
-| 2026-06-06 | src/train.py | 重写：增强特征→ExtraTrees选Top-100→LightGBM训练+5折CV。保存lgbm_model.pkl+top_feature_idx.pkl |
-| 2026-06-06 | src/evaluate.py | 重写：LightGBM评估+各环境准确率+特征重要度。5折CV 0.838±0.012，test 0.843 |
-| 2026-06-06 | src/dataset.py | 简化：仅保留按标签分层划分，删除环境分层和文件投票相关代码 |
-| 2026-06-06 | requirements.txt | 加 lightgbm、xgboost、imbalanced-learn |
+| 2026-06-11 | src/decompose/features_temporal.py | 新增117维时序特征(时间分段剖面/IMF时序/包络峰值)，专门捕获sc双峰结构 |
+| 2026-06-11 | src/model.py | 升级为4模型软投票(2×LGBM+ET+SVM)，5种子均值0.870±0.021 |
+| 2026-06-11 | src/train.py | 重写：加载增强+时序特征(349维)→Top-100选择→4模型软投票训练 |
+| 2026-06-11 | src/evaluate.py | 更新为集成模型评估 |
