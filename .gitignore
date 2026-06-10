@@ -4,3 +4,9 @@
 .claude
 code_guide.md
 data/
+checkpoints/*.pkl
+checkpoints/*.pt
+__pycache__/
+*.pyc
+*.pyo
+src/__pycache__/

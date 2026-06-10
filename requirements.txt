@@ -10,3 +10,6 @@ tqdm
 PyWavelets
 EMD-signal
 vmdpy
+lightgbm
+xgboost
+imbalanced-learn

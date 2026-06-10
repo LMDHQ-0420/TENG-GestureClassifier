@@ -162,26 +162,43 @@ Raw CSV → segmenter → cleaner → features → 9D 特征 CSV
 
 ---
 
-## 基线模型（src/model.py）
+## 最终主模型（src/model.py + src/train.py + src/evaluate.py）
 
-随机森林分类器（scikit-learn `RandomForestClassifier`）：
-- 200 棵决策树，`max_features="sqrt"`，`class_weight="balanced"`
-- 输入：9D 标准化特征向量
-- 输出：10 类手势
+### 模型：LightGBM + Top-100 特征选择
 
-## 数据划分（src/dataset.py）
+经系统实验对比（ExtraTrees/RF/SVM/MLP/XGBoost/LightGBM），LightGBM + Top-100 特征效果最优：
 
-- 读取 `all_features.csv`，按 `(环境, 手势)` 组合分层抽样
-- 每组 ~20% 作为测试集，至少保证 1 个测试样本
-- **每个环境在 train 和 test 中均有样本**
-- 使用 `StandardScaler` 标准化（基于训练集 fit）
-- 划分结果保存到 `all_features_split.csv`（含 `split` 列）
+| 方法 | 5种子平均 |
+|------|---------|
+| ExtraTrees-800 (全232维) | 0.816±0.018 |
+| LightGBM-500 (全232维) | 0.825±0.025 |
+| **LightGBM-800 (Top-100维)** | **0.847±0.017** |
 
-## 训练（src/train.py）
+**关键发现**：Top-100 特征比全 232 维更好——噪声维度会降低准确率。
+用 ExtraTrees 重要度选出 Top-100，再喂给 LightGBM。
 
-- 加载数据 → 分层划分 → 训练随机森林
-- 保存模型到 `checkpoints/random_forest.pkl`
-- 保存 scaler 到 `checkpoints/scaler.pkl`
+**LightGBM 参数**：n_estimators=800, num_leaves=63, learning_rate=0.03,
+subsample=0.8, colsample_bytree=0.8, min_child_samples=10, class_weight=balanced
+
+### 数据划分（src/dataset.py）
+
+- 读取 `enhanced_features.csv`，按手势标签分层抽样 80/20
+- 不按环境分层（最大化判别效果）
+- 划分结果保存到 `final_split.csv`
+
+### 训练（src/train.py）
+
+1. 加载增强特征（`enhanced_features.csv`，若无则自动提取）
+2. 按标签分层划分 train/test（random_state=42）
+3. ExtraTrees 重要度选 Top-100 特征
+4. LightGBM 训练 + 5折CV
+5. 保存 `checkpoints/lgbm_model.pkl` 和 `checkpoints/top_feature_idx.pkl`
+
+### 评估（src/evaluate.py）
+
+- 整体 classification_report + 混淆矩阵
+- 各环境单独准确率
+- LightGBM 特征重要度（Top-20）
 
 ## 评估（src/evaluate.py）
 
@@ -221,3 +238,11 @@ Raw CSV → segmenter → cleaner → features → 9D 特征 CSV
 | 2026-06-06 | src/decompose/features_enhanced.py | 新增232维增强特征(Hjorth/熵/Hilbert包络/小波包/通道相关)。单片段5种子真实均值0.796 |
 | 2026-06-06 | notebooks/ | 新增 06_summary_comparison.ipynb：多方法5种子真实对比+学习曲线+数据量建议。文件级投票达0.863，外推达90%需每类~69片段(1.8倍数据) |
 | 2026-06-06 | data/processed/method_results.json | 缓存所有方法的多种子实验结果+学习曲线外推，供notebook读取 |
+| 2026-06-06 | data/raw/base/ | 补充新采集数据（-3后缀，10个文件），base从20→30文件。总片段493→1210，base片段245→962 |
+| 2026-06-06 | src/decompose/features_enhanced.py + Stacking | V2数据重跑：增强特征单片段0.816±0.018；Stacking(ET+SVM+RF)0.842±0.021；文件投票0.853±0.020 |
+| 2026-06-06 | notebooks/06 | 更新汇总notebook：V1/V2对比、学习曲线（显示饱和趋势）、数据量建议（手势4/sc是唯一瓶颈，补采达90%） |
+| 2026-06-06 | src/model.py | 模型架构改为 LightGBM+Top-100特征选择。系统对比7种模型后 LightGBM+特征选择最优（0.847±0.017），删除文件投票逻辑 |
+| 2026-06-06 | src/train.py | 重写：增强特征→ExtraTrees选Top-100→LightGBM训练+5折CV。保存lgbm_model.pkl+top_feature_idx.pkl |
+| 2026-06-06 | src/evaluate.py | 重写：LightGBM评估+各环境准确率+特征重要度。5折CV 0.838±0.012，test 0.843 |
+| 2026-06-06 | src/dataset.py | 简化：仅保留按标签分层划分，删除环境分层和文件投票相关代码 |
+| 2026-06-06 | requirements.txt | 加 lightgbm、xgboost、imbalanced-learn |
