@@ -1,6 +1,6 @@
-"""학습 파이프라인: 증강 특징 + 시간 특징 + 포락선 특징 → log 변환 → Top-100 선택 → 4모델 소프트 투표
+"""训练流水线：增强特征 + 时序特征 + 包络特征 → log变换 → Top-100选择 → 4模型软投票
 
-사용법: python -m src.train
+用法：python -m src.train
 """
 
 import sys
@@ -46,36 +46,36 @@ def _envelope_profile(seg):
 
 
 def load_features():
-    """세 가지 특징 세트 로드 및 log 변환 적용"""
+    """加载三类特征并应用 log 变换"""
     meta = pd.read_csv(PROJECT_ROOT / "data" / "processed" / "features" / "all_features.csv")
     meta = meta[meta["duration_ms"] >= 200].reset_index(drop=True)
     y = meta["label"].values
 
-    # 증강 특징
+    # 增强特征
     X_enh = pd.read_csv(ENHANCED_PATH)[ENHANCED_FEATURE_NAMES].values[:len(y)]
 
-    # 시간 특징
+    # 时序特征
     if TEMPORAL_PATH.exists():
         X_temp = np.load(TEMPORAL_PATH)
     else:
-        print("시간 특징 추출 중...")
+        print("提取时序特征中...")
         X_temp = np.array([extract_temporal_features(np.load(PROJECT_ROOT / "data" / r["npy_path"]).astype(np.float32))
                            for _, r in meta.iterrows()])
         X_temp = np.nan_to_num(X_temp)
         np.save(TEMPORAL_PATH, X_temp)
 
-    # 포락선 특징
+    # 包络特征
     if ENVELOPE_PATH.exists():
         X_env = np.load(ENVELOPE_PATH)
     else:
-        print("포락선 특징 추출 중...")
+        print("提取包络特征中...")
         X_env = np.array([_envelope_profile(np.load(PROJECT_ROOT / "data" / r["npy_path"]).astype(np.float32))
                           for _, r in meta.iterrows()])
         X_env = np.nan_to_num(X_env)
         np.save(ENVELOPE_PATH, X_env)
 
     X = np.hstack([X_enh, X_temp, X_env])
-    print(f"원본 특징: {X.shape[1]}차원  →  log 변환 적용")
+    print(f"原始特征: {X.shape[1]}维  →  应用 log 变换")
     X = log_transform(X)
     return X, y, meta
 
@@ -88,7 +88,7 @@ def train(test_ratio: float = 0.2, random_state: int = 42):
     itr, ite = train_test_split(np.arange(n), test_size=test_ratio,
                                 stratify=y, random_state=random_state)
 
-    print(f"\n특징 선택: {X.shape[1]}차원 → Top-{TOP_K}...")
+    print(f"\n特征选择: {X.shape[1]}维 → Top-{TOP_K}...")
     top_idx = select_top_features(X[itr], y[itr], k=TOP_K, random_state=random_state)
     X_sel = X[:, top_idx]
 
@@ -99,14 +99,14 @@ def train(test_ratio: float = 0.2, random_state: int = 42):
     X_train_s = scaler.transform(X_train)
     X_test_s = scaler.transform(X_test)
 
-    print(f"Train: {len(y_train)}, Test: {len(y_test)}")
+    print(f"训练集: {len(y_train)}, 测试集: {len(y_test)}")
 
     models = build_ensemble(random_state=random_state)
-    print("\n4개 모델 학습 중...")
+    print("\n4个模型训练中...")
     for i, m in enumerate(models):
         Xm = X_train_s if i == 3 else X_train
         m.fit(Xm, y_train)
-        print(f"  모델{i+1} 완료")
+        print(f"  模型{i+1} 完成")
 
     p1 = models[0].predict_proba(X_test)
     p2 = models[1].predict_proba(X_test)
@@ -116,7 +116,7 @@ def train(test_ratio: float = 0.2, random_state: int = 42):
     pred = models[0].classes_[avg.argmax(1)]
     test_acc = accuracy_score(y_test, pred)
 
-    print(f"\nTest Accuracy (4모델 소프트 투표): {test_acc:.3f}")
+    print(f"\n测试准确率（4模型软投票）: {test_acc:.3f}")
 
     joblib.dump(models, MODEL_DIR / "ensemble_models.pkl")
     joblib.dump(top_idx, MODEL_DIR / "top_feature_idx.pkl")
@@ -127,7 +127,7 @@ def train(test_ratio: float = 0.2, random_state: int = 42):
     meta_out.loc[meta_out.index[ite], "split"] = "test"
     meta_out.to_csv(PROJECT_ROOT / "data" / "processed" / "features" / "final_split.csv", index=False)
 
-    print(f"모델 저장: {MODEL_DIR / 'ensemble_models.pkl'}")
+    print(f"模型已保存: {MODEL_DIR / 'ensemble_models.pkl'}")
     return test_acc
 
 

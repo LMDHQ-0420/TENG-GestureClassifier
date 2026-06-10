@@ -1,15 +1,15 @@
-"""최종 분류 모델: log 변환 + Top-100 특징 선택 + 4모델 소프트 투표
+"""最终分类模型：log变换 + Top-100特征选择 + 4模型软投票
 
-핵심 발견:
-- 특징에 log1p 변환(sign(x)*log1p(|x|))을 적용하면 작은 값 간 차이가 증폭되어
-  수백 번의 실험 중 가장 높은 정확도 달성 (단일 시드 0.872, 5종자 평균 ~0.870)
-- 4개 다양한 모델 소프트 투표: 2×LGBM + ExtraTrees + SVM
-- 최대 100개 특징 선택 (ET 중요도 기반)
+核心发现：
+- 对特征应用 log1p 变换（sign(x)*log1p(|x|)）可放大小值间差异，
+  经数百次实验验证准确率最高（单种子 0.872，5种子均值约 0.870）
+- 4个多样化模型软投票：2×LGBM + ExtraTrees + SVM
+- 最多选取 100 个特征（基于 ExtraTrees 重要度）
 
-특징 구성 (373차원):
-- 232차원: 증강 특징 (VMD IMF 통계, 소파수 패킷 에너지 등)
-- 117차원: 시간 특징 (4단 프로파일, IMF 시간 중심, 포락선 피크)
-- 24차원: 포락선 프로파일 (6단 포락선 + 피크 위치/감쇠)
+特征构成（373维）：
+- 232维：增强特征（VMD IMF统计、小波包能量等）
+- 117维：时序特征（4段剖面、IMF时间重心、包络峰值）
+- 24维：包络剖面（6段包络均值 + 峰值位置/衰减时间）
 """
 
 import numpy as np
@@ -19,17 +19,17 @@ from sklearn.svm import SVC
 
 
 def log_transform(X: np.ndarray) -> np.ndarray:
-    """부호 보존 log1p 변환: sign(x) * log1p(|x|)
+    """符号保留的 log1p 变换：sign(x) * log1p(|x|)
 
-    작은 값 사이의 차이를 증폭시켜 분류 성능을 향상시킴.
-    특히 손짓 4/ok/sc처럼 특징값이 유사한 클래스 구분에 효과적.
+    放大小值之间的差异，提升分类性能。
+    对手势4/ok/sc这类特征值相近的类别区分尤其有效。
     """
     return np.sign(X) * np.log1p(np.abs(X))
 
 
 def select_top_features(X_train: np.ndarray, y_train: np.ndarray,
                         k: int = 100, random_state: int = 42) -> np.ndarray:
-    """ExtraTrees 중요도 기반 Top-k 특징 인덱스 선택"""
+    """基于 ExtraTrees 重要度选择 Top-k 特征索引"""
     et = ExtraTreesClassifier(800, class_weight='balanced',
                               random_state=random_state, n_jobs=-1)
     et.fit(X_train, y_train)
@@ -37,10 +37,10 @@ def select_top_features(X_train: np.ndarray, y_train: np.ndarray,
 
 
 def build_ensemble(random_state: int = 42) -> list:
-    """4개 다양한 분류기 목록 반환 (순서: m1, m2, m3(ET), m4(SVM))
+    """返回4个多样化分类器列表（顺序：m1, m2, m3(ET), m4(SVM)）
 
-    m1,m2,m3: 비표준화 특징 사용
-    m4(SVM): 표준화 특징 사용 (StandardScaler 필요)
+    m1, m2, m3：使用非标准化特征
+    m4(SVM)：使用标准化特征（需配合 StandardScaler）
     """
     return [
         lgb.LGBMClassifier(
