@@ -241,7 +241,6 @@ subsample=0.8, colsample_bytree=0.8, min_child_samples=10, class_weight=balanced
 | 2026-06-06 | data/raw/base/ | 补充新采集数据（-3后缀，10个文件），base从20→30文件。总片段493→1210，base片段245→962 |
 | 2026-06-06 | src/decompose/features_enhanced.py + Stacking | V2数据重跑：增强特征单片段0.816±0.018；Stacking(ET+SVM+RF)0.842±0.021；文件投票0.853±0.020 |
 | 2026-06-06 | notebooks/06 | 更新汇总notebook：V1/V2对比、学习曲线（显示饱和趋势）、数据量建议（手势4/sc是唯一瓶颈，补采达90%） |
-| 2026-06-11 | src/decompose/features_temporal.py | 新增117维时序特征(时间分段剖面/IMF时序/包络峰值)，专门捕获sc双峰结构 |
-| 2026-06-11 | src/model.py | 升级为4模型软投票(2×LGBM+ET+SVM)，5种子均值0.870±0.021 |
-| 2026-06-11 | src/train.py | 重写：加载增强+时序特征(349维)→Top-100选择→4模型软投票训练 |
-| 2026-06-11 | src/evaluate.py | 更新为集成模型评估 |
+| 2026-06-11 | src/model.py | 新增 log_transform()；模型架构说明更新为 log变换+4模型软投票 |
+| 2026-06-11 | src/train.py | 重写：加载增强+时序+包络特征(373维)→log变换→ET Top-100→4模型软投票。test 0.872 |
+| 2026-06-11 | src/evaluate.py | 更新为最终集成模型评估，输出各环境准确率和混淆矩阵 |
