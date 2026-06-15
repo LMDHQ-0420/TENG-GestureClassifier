@@ -48,6 +48,12 @@
 └── svg/                        输出图表
 ```
 
+## 下载
+
+**模型文件**（`checkpoints/*.pkl` / `.pt`）：[HuggingFace Models](https://huggingface.co/LMDHQ-0420/TENG-GestureClassifier-Models)
+
+**原始数据**（`data/raw/`）：[HuggingFace Dataset](https://huggingface.co/datasets/LMDHQ-0420/TENG-GestureClassifier-Dataset)
+
 ## 环境配置
 
 ```bash

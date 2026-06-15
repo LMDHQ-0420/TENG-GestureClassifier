@@ -48,6 +48,12 @@ Gesture classes (10): `1` `2` `3` `4` `5` `go_the_way` `ok` `sc` `stop` `wave`
 └── svg/                        output figures
 ```
 
+## Downloads
+
+**Model files** (`checkpoints/*.pkl` / `.pt`): [HuggingFace Models](https://huggingface.co/LMDHQ-0420/TENG-GestureClassifier-Models)
+
+**Raw data** (`data/raw/`): [HuggingFace Dataset](https://huggingface.co/datasets/LMDHQ-0420/TENG-GestureClassifier-Dataset)
+
 ## Setup
 
 ```bash
