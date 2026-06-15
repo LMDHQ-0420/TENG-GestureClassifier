@@ -8,3 +8,7 @@ __pycache__/
 *.pyo
 src/__pycache__/
 notebooks/TENG_GestureClassifier.ipynb
+data/
+checkpoints/*.pkl
+checkpoints/*.pt
+checkpoints/*.npy
