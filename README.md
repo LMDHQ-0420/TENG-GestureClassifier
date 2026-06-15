@@ -1,5 +1,7 @@
 # TENG Gesture Recognition
 
+[中文版](README.zh.md)
+
 Gesture classification system based on triboelectric nanogenerator (TENG) sensors. The sensor captures 3-channel voltage signals (CH1/CH3/CH5, 1000 Hz) and classifies 10 gestures across three environments.
 
 ## Dataset
