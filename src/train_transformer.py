@@ -522,6 +522,11 @@ def main():
     joblib.dump(feat_models,  MODEL_DIR / "ensemble_models_tr.pkl")
     joblib.dump(top_idx,      MODEL_DIR / "top_feature_idx_tr.pkl")
     joblib.dump(feat_scaler,  MODEL_DIR / "scaler_tr.pkl")
+
+    # ── 保存推断结果（供可视化直接加载，无需重跑推断）──
+    np.save(MODEL_DIR / "test_pred.npy",  pred_all)
+    np.save(MODEL_DIR / "test_true.npy",  y_te)
+    np.save(MODEL_DIR / "test_envs.npy",  envs_te)
     print("所有模型组件已保存。")
 
     return overall
